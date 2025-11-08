@@ -1,0 +1,15 @@
+[package]
+name = "blunder-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+solana-program = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[lib]
+name = "blunder_core"
+path = "src/lib.rs"

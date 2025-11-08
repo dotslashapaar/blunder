@@ -1,0 +1,21 @@
+[workspace]
+members = ["core", "scheduler", "engine"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Apaar"]
+license = "MIT"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+dashmap = "5"
+solana-program = "2.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+criterion = "0.5"
+tokio-test = "0.4"
