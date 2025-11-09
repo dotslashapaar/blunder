@@ -1,8 +1,8 @@
-mod bundle;
-mod errors;
-mod metadata;
-mod traits;
-mod transaction;
+pub mod bundle;
+pub mod errors;
+pub mod metadata;
+pub mod traits;
+pub mod transaction;
 
 pub use bundle::*;
 pub use errors::*;
