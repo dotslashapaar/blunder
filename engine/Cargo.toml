@@ -24,3 +24,7 @@ tokio-test = { workspace = true }
 [[bin]]
 name = "blunder-tpu"
 path = "src/main.rs"
+
+[lib]
+name = "blunder_engine"
+path = "src/lib.rs"
