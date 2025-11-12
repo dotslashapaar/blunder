@@ -18,13 +18,27 @@ impl AdaptiveScheduler {
 
     fn choose_scheduler(&self, total_items: usize) -> &dyn Scheduler {
         self.load_monitor.update_pending(total_items);
-
+        
+        // =======================================================================
+        // SCHEDULER COMPARISON MODE
+        // Uncomment ONE of the following sections to force a specific scheduler:
+        // =======================================================================
+        
+        // --- FORCE GREEDY (for comparison) ---
+        // return &self.greedy as &dyn Scheduler;
+        
+        // --- FORCE PRIOGRAPH (default) ---
+        // return &self.priograph as &dyn Scheduler;
+        
+        // --- ADAPTIVE (automatic selection based on load) ---
         if self.load_monitor.should_use_greedy() {
+            println!("  [Scheduler] Using GREEDY (high load: {} items)", total_items);
             &self.greedy as &dyn Scheduler
         } else if self.load_monitor.should_use_prio_graph() {
+            println!("  [Scheduler] Using PRIOGRAPH (low load: {} items)", total_items);
             &self.priograph as &dyn Scheduler
         } else {
-            // Medium load: use PrioGraph
+            println!("  [Scheduler] Using PRIOGRAPH (medium load: {} items)", total_items);
             &self.priograph as &dyn Scheduler
         }
     }
@@ -50,7 +64,6 @@ impl Scheduler for AdaptiveScheduler {
 mod tests {
     use super::*;
     use blunder_core::{AccountMeta, Pubkey};
-    use std::collections::HashSet;
 
     #[test]
     fn test_adaptive_low_load() {
@@ -90,7 +103,6 @@ mod tests {
     fn test_adaptive_uses_priograph_for_low_load() {
         let scheduler = AdaptiveScheduler::new(4);
 
-        // 10 items < 500 threshold - should use PrioGraph
         let txs: Vec<_> = (0..10)
             .map(|i| {
                 Transaction::new(
@@ -108,19 +120,14 @@ mod tests {
         let assignments = result.unwrap();
         assert_eq!(assignments.len(), 10);
 
-        // PrioGraph should distribute across workers
-        let unique_workers: HashSet<_> = assignments.iter().map(|a| a.worker_id).collect();
-        assert!(
-            unique_workers.len() >= 2,
-            "PrioGraph should use multiple workers"
-        );
+        let unique_workers: std::collections::HashSet<_> = assignments.iter().map(|a| a.worker_id).collect();
+        assert!(unique_workers.len() >= 2, "PrioGraph should use multiple workers");
     }
 
     #[test]
     fn test_adaptive_uses_greedy_for_high_load() {
         let scheduler = AdaptiveScheduler::new(4);
 
-        // 3000 items > 2000 threshold - should use Greedy
         let txs: Vec<_> = (0..3000)
             .map(|i| {
                 Transaction::new(
@@ -143,7 +150,6 @@ mod tests {
     fn test_adaptive_medium_load() {
         let scheduler = AdaptiveScheduler::new(4);
 
-        // 1000 items (between 500 and 2000) - should use PrioGraph
         let txs: Vec<_> = (0..1000)
             .map(|i| {
                 Transaction::new(
@@ -191,7 +197,6 @@ mod tests {
     fn test_adaptive_threshold_boundaries() {
         let scheduler = AdaptiveScheduler::new(4);
 
-        // Test at exactly 500 (should use PrioGraph)
         let txs_500: Vec<_> = (0..500)
             .map(|i| {
                 Transaction::new(
@@ -206,7 +211,6 @@ mod tests {
         let result = scheduler.schedule(vec![], txs_500);
         assert!(result.is_ok());
 
-        // Test at exactly 2000 (should use PrioGraph)
         let txs_2000: Vec<_> = (0..2000)
             .map(|i| {
                 Transaction::new(
