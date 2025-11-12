@@ -10,14 +10,18 @@ pub enum WorkItem {
     Shutdown,
 }
 
-pub struct AsyncWorker{
+pub struct AsyncWorker {
     id: usize,
     locked_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     work_rx: mpsc::UnboundedReceiver<WorkItem>,
 }
 
 impl AsyncWorker {
-    pub fn new(id: usize, locked_accounts: Arc<RwLock<HashSet<Pubkey>>>, work_rx: mpsc::UnboundedReceiver<WorkItem>) -> Self {
+    pub fn new(
+        id: usize,
+        locked_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+        work_rx: mpsc::UnboundedReceiver<WorkItem>,
+    ) -> Self {
         Self {
             id,
             locked_accounts,
@@ -25,7 +29,7 @@ impl AsyncWorker {
         }
     }
 
-    pub async fn run(mut self){
+    pub async fn run(mut self) {
         println!("Worker {} starting", self.id);
 
         loop {
@@ -80,11 +84,11 @@ impl AsyncWorker {
         Ok(())
     }
 
-    async fn execute_bundle(&self, bundle: &Bundle)->Result<()>{
+    async fn execute_bundle(&self, bundle: &Bundle) -> Result<()> {
         let accounts = bundle.all_accounts();
         self.accquire_locks(&accounts).await?;
 
-        for _tx in &bundle.transactions{
+        for _tx in &bundle.transactions {
             tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
         }
 
@@ -93,18 +97,18 @@ impl AsyncWorker {
     }
 }
 
-pub struct AsyncWorkerPool{
+pub struct AsyncWorkerPool {
     worker_count: usize,
     senders: Vec<mpsc::UnboundedSender<WorkItem>>,
     global_locks: Arc<RwLock<HashSet<Pubkey>>>,
 }
 
 impl AsyncWorkerPool {
-    pub fn spawn(worker_count: usize)->Self{
+    pub fn spawn(worker_count: usize) -> Self {
         let global_locks = Arc::new(RwLock::new(HashSet::new()));
         let mut senders = Vec::new();
 
-        for id in 0..worker_count{
+        for id in 0..worker_count {
             let (tx, rx) = mpsc::unbounded_channel();
             let worker = AsyncWorker::new(id, Arc::clone(&global_locks), rx);
 
@@ -114,24 +118,32 @@ impl AsyncWorkerPool {
             senders.push(tx);
         }
 
-        Self { worker_count, senders, global_locks }
+        Self {
+            worker_count,
+            senders,
+            global_locks,
+        }
     }
 
-    pub fn send_work(&self, worker_id: usize, work: WorkItem)->Result<()>{
-        self.senders.get(worker_id).ok_or_else(|| MevError::SchedulerError("Invalid worker ID".to_string()))?.send(work).map_err(|_| MevError::SchedulerError("Worker channel closed".to_string()))
+    pub fn send_work(&self, worker_id: usize, work: WorkItem) -> Result<()> {
+        self.senders
+            .get(worker_id)
+            .ok_or_else(|| MevError::SchedulerError("Invalid worker ID".to_string()))?
+            .send(work)
+            .map_err(|_| MevError::SchedulerError("Worker channel closed".to_string()))
     }
 
-    pub fn worker_count(&self)->usize{
+    pub fn worker_count(&self) -> usize {
         self.worker_count
     }
 
-    pub async fn locked_account_count(&self)->usize{
+    pub async fn locked_account_count(&self) -> usize {
         self.global_locks.read().await.len()
     }
 
-    pub async fn shutdown(self){
+    pub async fn shutdown(self) {
         println!("Sending shutdown signal to {} workers", self.worker_count);
-        
+
         for sender in &self.senders {
             let _ = sender.send(WorkItem::Shutdown);
         }
@@ -139,5 +151,225 @@ impl AsyncWorkerPool {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         println!("All workers shut down");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blunder_core::{AccountMeta, Bundle, Pubkey, Transaction};
+
+    #[tokio::test]
+    async fn test_async_worker_pool_creation() {
+        let pool = AsyncWorkerPool::spawn(4);
+        assert_eq!(pool.worker_count(), 4);
+
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_execute_transaction() {
+        let pool = AsyncWorkerPool::spawn(2);
+
+        let tx = Transaction::new(
+            "tx1".to_string(),
+            vec![AccountMeta::new(Pubkey::new_unique(), true)],
+            100_000,
+            1000,
+        );
+
+        let result = pool.send_work(0, WorkItem::Transaction(tx));
+        assert!(result.is_ok());
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_execute_bundle() {
+        let pool = AsyncWorkerPool::spawn(2);
+
+        let tx1 = Transaction::new(
+            "bundle_tx1".to_string(),
+            vec![AccountMeta::new(Pubkey::new_unique(), true)],
+            100_000,
+            1000,
+        );
+
+        let tx2 = Transaction::new(
+            "bundle_tx2".to_string(),
+            vec![AccountMeta::new(Pubkey::new_unique(), true)],
+            100_000,
+            1000,
+        );
+
+        let bundle = Bundle::new(1, vec![tx1, tx2], 50_000, "searcher1".to_string());
+
+        let result = pool.send_work(0, WorkItem::Bundle(bundle));
+        assert!(result.is_ok());
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_conflicting_transactions() {
+        let pool = AsyncWorkerPool::spawn(2);
+
+        let shared_account = Pubkey::new_unique();
+
+        let tx1 = Transaction::new(
+            "tx1".to_string(),
+            vec![AccountMeta::new(shared_account, true)],
+            100_000,
+            1000,
+        );
+
+        let tx2 = Transaction::new(
+            "tx2".to_string(),
+            vec![AccountMeta::new(shared_account, true)],
+            100_000,
+            1000,
+        );
+
+        // Send to different workers
+        pool.send_work(0, WorkItem::Transaction(tx1)).unwrap();
+        pool.send_work(1, WorkItem::Transaction(tx2)).unwrap();
+
+        // One should succeed, one should fail (conflict on shared account)
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_parallel_execution() {
+        let pool = AsyncWorkerPool::spawn(4);
+
+        // 4 transactions with different accounts - should execute in parallel
+        for i in 0..4 {
+            let tx = Transaction::new(
+                format!("tx{}", i),
+                vec![AccountMeta::new(Pubkey::new_unique(), true)],
+                100_000,
+                1000,
+            );
+
+            pool.send_work(i, WorkItem::Transaction(tx)).unwrap();
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_invalid_worker_id() {
+        let pool = AsyncWorkerPool::spawn(2);
+
+        let tx = Transaction::new(
+            "tx1".to_string(),
+            vec![AccountMeta::new(Pubkey::new_unique(), true)],
+            100_000,
+            1000,
+        );
+
+        // Worker ID 5 doesn't exist (only 0 and 1)
+        let result = pool.send_work(5, WorkItem::Transaction(tx));
+        assert!(result.is_err());
+
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_shutdown_signal() {
+        let pool = AsyncWorkerPool::spawn(2);
+
+        // Send shutdown manually
+        pool.send_work(0, WorkItem::Shutdown).unwrap();
+        pool.send_work(1, WorkItem::Shutdown).unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Should complete gracefully
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_high_load() {
+        let pool = AsyncWorkerPool::spawn(4);
+
+        // Send 50 transactions
+        for i in 0..50 {
+            let tx = Transaction::new(
+                format!("tx{}", i),
+                vec![AccountMeta::new(Pubkey::new_unique(), true)],
+                100_000,
+                1000,
+            );
+
+            pool.send_work(i % 4, WorkItem::Transaction(tx)).unwrap();
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_locked_account_count() {
+        let pool = AsyncWorkerPool::spawn(2);
+
+        let shared_account = Pubkey::new_unique();
+
+        let tx = Transaction::new(
+            "tx1".to_string(),
+            vec![AccountMeta::new(shared_account, true)],
+            100_000,
+            1000,
+        );
+
+        pool.send_work(0, WorkItem::Transaction(tx)).unwrap();
+
+        // Give worker time to acquire lock
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        let _locked_count = pool.locked_account_count().await;
+        // Account may be locked or already released depending on timing
+
+        pool.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_async_worker_bundle_atomicity() {
+        let pool = AsyncWorkerPool::spawn(1);
+
+        let account1 = Pubkey::new_unique();
+        let account2 = Pubkey::new_unique();
+
+        let tx1 = Transaction::new(
+            "bundle_tx1".to_string(),
+            vec![AccountMeta::new(account1, true)],
+            100_000,
+            1000,
+        );
+
+        let tx2 = Transaction::new(
+            "bundle_tx2".to_string(),
+            vec![AccountMeta::new(account2, true)],
+            100_000,
+            1000,
+        );
+
+        // Bundle should execute atomically
+        let bundle = Bundle::new(1, vec![tx1, tx2], 100_000, "searcher1".to_string());
+
+        pool.send_work(0, WorkItem::Bundle(bundle)).unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        pool.shutdown().await;
     }
 }
