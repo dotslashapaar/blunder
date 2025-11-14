@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::bundle::Bundle;
 use crate::errors::Result;
 use crate::transaction::Transaction;
@@ -16,7 +18,7 @@ pub trait BundleEngine: Send + Sync {
     fn select_winners(&self, submissions: Vec<BundleSubmission>) -> Result<Vec<Bundle>>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkerAssignment {
     pub unit_id: String,
     pub worker_id: usize,

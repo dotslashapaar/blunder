@@ -19,6 +19,21 @@ pub enum MevError {
 
     #[error("Invalid transaction: {0}")]
     InvalidTransaction(String),
+
+    #[error("Initialization error: {0}")]
+    InitError(String),
+
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
+    #[error("Timeout: {0}")]
+    Timeout(String),
+
+    #[error("Invalid assignment: {0}")]
+    InvalidAssignment(String),
 }
 
 pub type Result<T> = std::result::Result<T, MevError>;

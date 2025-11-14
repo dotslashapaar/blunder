@@ -18,28 +18,27 @@ impl AdaptiveScheduler {
 
     fn choose_scheduler(&self, total_items: usize) -> &dyn Scheduler {
         self.load_monitor.update_pending(total_items);
-        
-        // =======================================================================
-        // SCHEDULER COMPARISON MODE
-        // Uncomment ONE of the following sections to force a specific scheduler:
-        // =======================================================================
-        
-        // --- FORCE GREEDY (for comparison) ---
+
+        // Uncomment exactly one to force a scheduler for testing:
+
+        // force greedy
         // return &self.greedy as &dyn Scheduler;
-        
-        // --- FORCE PRIOGRAPH (default) ---
+
+        // force priograph
         // return &self.priograph as &dyn Scheduler;
-        
-        // --- ADAPTIVE (automatic selection based on load) ---
+
         if self.load_monitor.should_use_greedy() {
-            println!("  [Scheduler] Using GREEDY (high load: {} items)", total_items);
-            &self.greedy as &dyn Scheduler
-        } else if self.load_monitor.should_use_prio_graph() {
-            println!("  [Scheduler] Using PRIOGRAPH (low load: {} items)", total_items);
-            &self.priograph as &dyn Scheduler
+            println!(
+                "  [Scheduler] Using GREEDY (high load: {} items)",
+                total_items
+            );
+            &self.greedy
         } else {
-            println!("  [Scheduler] Using PRIOGRAPH (medium load: {} items)", total_items);
-            &self.priograph as &dyn Scheduler
+            println!(
+                "  [Scheduler] Using PRIOGRAPH (load: {} items)",
+                total_items
+            );
+            &self.priograph
         }
     }
 }
@@ -68,14 +67,12 @@ mod tests {
     #[test]
     fn test_adaptive_low_load() {
         let scheduler = AdaptiveScheduler::new(4);
-
         let tx = Transaction::new(
             "tx1".to_string(),
             vec![AccountMeta::new(Pubkey::new_unique(), true)],
             100_000,
             1000,
         );
-
         let result = scheduler.schedule(vec![], vec![tx]);
         assert!(result.is_ok());
     }
@@ -83,7 +80,6 @@ mod tests {
     #[test]
     fn test_adaptive_high_load() {
         let scheduler = AdaptiveScheduler::new(4);
-
         let txs: Vec<_> = (0..100)
             .map(|i| {
                 Transaction::new(
@@ -94,7 +90,6 @@ mod tests {
                 )
             })
             .collect();
-
         let result = scheduler.schedule(vec![], txs);
         assert!(result.is_ok());
     }
@@ -102,7 +97,6 @@ mod tests {
     #[test]
     fn test_adaptive_uses_priograph_for_low_load() {
         let scheduler = AdaptiveScheduler::new(4);
-
         let txs: Vec<_> = (0..10)
             .map(|i| {
                 Transaction::new(
@@ -113,21 +107,23 @@ mod tests {
                 )
             })
             .collect();
-
         let result = scheduler.schedule(vec![], txs);
         assert!(result.is_ok());
 
         let assignments = result.unwrap();
         assert_eq!(assignments.len(), 10);
 
-        let unique_workers: std::collections::HashSet<_> = assignments.iter().map(|a| a.worker_id).collect();
-        assert!(unique_workers.len() >= 2, "PrioGraph should use multiple workers");
+        let unique_workers: std::collections::HashSet<_> =
+            assignments.iter().map(|a| a.worker_id).collect();
+        assert!(
+            unique_workers.len() >= 2,
+            "PrioGraph should use multiple workers"
+        );
     }
 
     #[test]
     fn test_adaptive_uses_greedy_for_high_load() {
         let scheduler = AdaptiveScheduler::new(4);
-
         let txs: Vec<_> = (0..3000)
             .map(|i| {
                 Transaction::new(
@@ -138,7 +134,6 @@ mod tests {
                 )
             })
             .collect();
-
         let result = scheduler.schedule(vec![], txs);
         assert!(result.is_ok());
 
@@ -149,7 +144,6 @@ mod tests {
     #[test]
     fn test_adaptive_medium_load() {
         let scheduler = AdaptiveScheduler::new(4);
-
         let txs: Vec<_> = (0..1000)
             .map(|i| {
                 Transaction::new(
@@ -160,7 +154,6 @@ mod tests {
                 )
             })
             .collect();
-
         let result = scheduler.schedule(vec![], txs);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 1000);
@@ -169,7 +162,6 @@ mod tests {
     #[test]
     fn test_adaptive_with_bundles() {
         let scheduler = AdaptiveScheduler::new(4);
-
         let pubkey = Pubkey::new_unique();
         let tx = Transaction::new(
             "tx1".to_string(),
@@ -177,9 +169,7 @@ mod tests {
             100_000,
             1000,
         );
-
         let bundle = Bundle::new(1, vec![tx], 50_000, "searcher1".to_string());
-
         let result = scheduler.schedule(vec![bundle], vec![]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 1);
@@ -196,7 +186,6 @@ mod tests {
     #[test]
     fn test_adaptive_threshold_boundaries() {
         let scheduler = AdaptiveScheduler::new(4);
-
         let txs_500: Vec<_> = (0..500)
             .map(|i| {
                 Transaction::new(
@@ -207,7 +196,6 @@ mod tests {
                 )
             })
             .collect();
-
         let result = scheduler.schedule(vec![], txs_500);
         assert!(result.is_ok());
 
@@ -221,7 +209,6 @@ mod tests {
                 )
             })
             .collect();
-
         let result = scheduler.schedule(vec![], txs_2000);
         assert!(result.is_ok());
     }
