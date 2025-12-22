@@ -12,11 +12,11 @@ thiserror = { workspace = true }
 quinn = { workspace = true }
 rustls = { workspace = true }
 bincode = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 
 [lib]
 name = "blunder_core"
 path = "src/lib.rs"
 
 [dev-dependencies]
-once_cell = "1.17.1"
+once_cell = { workspace = true }
