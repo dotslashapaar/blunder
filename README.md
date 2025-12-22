@@ -1,6 +1,6 @@
 # Blunder - Solana's Adaptive Scheduler
 
-#### Blunder is a custom Solana scheduler that does it all — Jito-style bundles, Rakurai-level dense packing, automatic scheduler switching (no manual Agave config needed 😎), and even has external schedulers as plug-ins. Basically… it supports everything. 😂
+#### Blunder is a custom Solana scheduler that does it all — Jito-style bundles, Rakurai-level dense packing, automatic scheduler switching (no manual Agave config needed), and even has external schedulers as plug-ins. Basically, it supports everything.
 
 ## Blunder - Quick Start Guide
 
@@ -95,24 +95,24 @@ Block Engine ─> TPU Pipeline ─> Scheduler ─> Workers ─> Executors
                  ↓
    ┌─────────────────────────────────────────────┐
    │ STAGE 3: PRIORITIZER (5ms)                  │
-   │ Combined fee + compute unit (CU) ordering   │
+   │ Fee-per-CU efficiency ordering              │
    │                                             │
    │ Algorithm:                                  │
-   │   Score = (fee × 0.7) + (CU × 0.3)          │
-   │   • 70%: Validator revenue (fees)           │
-   │   • 30%: Execution efficiency (CU)          │
+   │   Score = (fee × 1,000,000) / CU            │
+   │   • Maximizes validator revenue per CU      │
+   │   • Rewards efficient transactions          │
    │                                             │
    │ Process:                                    │
-   │   1. Calculate score                        │
+   │   1. Calculate fee-per-CU score             │
    │   2. Sort descending                        │
-   │   3. Output balanced queue                  │
+   │   3. Output efficiency-ranked queue         │
    │                                             │
    │ Result:                                     │
-   │   • Prioritize high-fee txs                 │
-   │   • Include high-compute early              │
-   │   • Optimize worker utilization             │
+   │   • Dense blocks (max fees in 48M CU)       │
+   │   • Efficient txs prioritized               │
+   │   • Aligned with validator incentives       │
    │ Thread: 1                                   │
-   │ Status: New combined stage                  │
+   │ Status: Fee-per-CU prioritization           │
    └─────────────┬───────────────────────────────┘
                  ↓
    ┌─────────────────────────────────────────┐
