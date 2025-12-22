@@ -156,9 +156,12 @@ fn convert_execution_unit_to_bundle(unit: &ExecutionUnitData) -> Result<Bundle> 
             accounts: _,
             num_transactions: _,
         } => {
+            let bundle_id = id.parse::<u64>().map_err(|_| {
+                blunder_core::MevError::InvalidTransaction(format!("Invalid bundle ID: {}", id))
+            })?;
             Ok(Bundle::new(
-                id.parse::<u64>().unwrap_or(0),
-                vec![], // supply actual transactions if available
+                bundle_id,
+                vec![],
                 *tip,
                 "default_searcher".to_string(),
             ))

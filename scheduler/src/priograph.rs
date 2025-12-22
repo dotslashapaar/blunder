@@ -138,7 +138,10 @@ impl PrioGraphScheduler {
                 .collect();
 
             let worker_id = if !available.is_empty() {
-                *available.iter().min_by_key(|&&w| worker_loads[w]).unwrap()
+                *available
+                    .iter()
+                    .min_by_key(|&&w| worker_loads[w])
+                    .expect("available is non-empty")
             } else {
                 worker_loads
                     .iter()
