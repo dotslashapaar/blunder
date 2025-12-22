@@ -49,7 +49,12 @@ impl TpuPipeline {
 
         for assignment in assignments {
             let work = if assignment.is_bundle {
-                let bundle_id: u64 = assignment.unit_id.parse().unwrap_or(0);
+                let bundle_id: u64 = assignment.unit_id.parse().map_err(|_| {
+                    blunder_core::MevError::InvalidTransaction(format!(
+                        "Invalid bundle ID: {}",
+                        assignment.unit_id
+                    ))
+                })?;
                 if let Some(bundle) = bundle_map.remove(&bundle_id) {
                     WorkItem::Bundle(bundle)
                 } else {

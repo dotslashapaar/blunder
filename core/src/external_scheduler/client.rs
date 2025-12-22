@@ -4,9 +4,11 @@ use super::protocol::*;
 use crate::{MevError, Result, WorkerAssignment};
 use quinn::{ClientConfig, Endpoint};
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
+
+const BIND_ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
 
 // Certificate verifier that skips validation for localhost testing
 #[derive(Debug)]
@@ -75,10 +77,9 @@ impl ExternalSchedulerClient {
         let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config)
             .map_err(|e| MevError::InitError(format!("Crypto config failed: {:?}", e)))?;
 
-        // Create quinn ClientConfig
         let client_config = ClientConfig::new(Arc::new(crypto));
 
-        let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
+        let mut endpoint = Endpoint::client(BIND_ADDR)
             .map_err(|e| MevError::InitError(format!("Endpoint creation failed: {}", e)))?;
         endpoint.set_default_client_config(client_config);
 
