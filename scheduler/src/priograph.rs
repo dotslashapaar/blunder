@@ -44,18 +44,24 @@ impl PrioGraphScheduler {
         let mut nodes = Vec::new();
 
         for bundle in bundles {
+            let cu = bundle.total_compute_units().max(1);
             nodes.push(Node {
                 id: bundle.id.to_string(),
-                priority: bundle.tip,
+                priority: bundle.tip.saturating_mul(1_000_000).saturating_div(cu),
                 accounts: bundle.all_accounts(),
                 is_bundle: true,
             });
         }
 
         for tx in loose_txs {
+            let cu = tx.compute_unit_limit.max(1);
+            let fee = tx
+                .compute_unit_price
+                .saturating_mul(tx.compute_unit_limit)
+                .saturating_div(1_000_000);
             nodes.push(Node {
                 id: tx.signature.clone(),
-                priority: (tx.compute_unit_price * tx.compute_unit_limit) / 1_000_000,
+                priority: fee.saturating_mul(1_000_000).saturating_div(cu),
                 accounts: tx.all_accounts(),
                 is_bundle: false,
             });

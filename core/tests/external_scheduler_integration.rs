@@ -87,7 +87,7 @@ mod integration_tests {
             "bundle1 should be marked as bundle"
         );
 
-        println!("\n✅ All assertions passed!");
+        println!("\nAll assertions passed!");
     }
 
     #[tokio::test]
@@ -116,6 +116,6 @@ mod integration_tests {
             println!("Request {} completed", request_num);
         }
 
-        println!("✅ Multiple requests test passed!");
+        println!("Multiple requests test passed!");
     }
 }

@@ -108,13 +108,9 @@ fn convert_to_work_item(unit: &ExecutionUnitData) -> Result<WorkItem> {
             id: _,
             priority: _,
             accounts: _,
-        } => {
-            // You need to reconstruct Transaction type as per your definition, or adapt WorkItem to hold ExecutionUnitData directly
-            // For simplicity assuming WorkItem can hold ExecutionUnitData directly:
-            Ok(WorkItem::Transaction(
-                convert_execution_unit_to_transaction(unit)?,
-            ))
-        }
+        } => Ok(WorkItem::Transaction(
+            convert_execution_unit_to_transaction(unit)?,
+        )),
         ExecutionUnitData::Bundle {
             id: _,
             tip: _,
