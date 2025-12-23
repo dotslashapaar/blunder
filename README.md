@@ -6,6 +6,10 @@
 
 #### Blunder is a custom Solana scheduler that does it all — Jito-style bundles, Rakurai-level dense packing, automatic scheduler switching (no manual Agave config needed), and even has external schedulers as plug-ins. Basically, it supports everything.
 
+## 📖 Documentation
+
+For a detailed explanation of the project architecture, design decisions, and implementation details, check out the [**Blunder Documentation**](https://dotslashapaar.notion.site/Blunder-Solana-s-Adaptive-Scheduler-2af1a21183b58022a210e19b91411006).
+
 ## Blunder - Quick Start Guide
 
 ### 1. Clone the repository and build
