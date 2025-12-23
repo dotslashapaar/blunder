@@ -29,7 +29,7 @@ impl TpuPipeline {
     ) -> Result<()> {
         let units = self
             .prioritizer
-            .priortize(bundles.clone(), loose_txs.clone());
+            .prioritize(bundles.clone(), loose_txs.clone());
         println!("Prioritized {} units", units.len());
 
         let mut bundle_map: HashMap<u64, Bundle> = bundles.into_iter().map(|b| (b.id, b)).collect();

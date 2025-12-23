@@ -13,6 +13,7 @@ quinn = { workspace = true }
 rustls = { workspace = true }
 bincode = { workspace = true }
 tokio = { workspace = true }
+parking_lot = { workspace = true }
 
 [lib]
 name = "blunder_core"

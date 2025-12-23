@@ -1,6 +1,7 @@
 pub mod bundle;
 pub mod errors;
 pub mod external_scheduler;
+pub mod lock_guard;
 pub mod metadata;
 pub mod traits;
 pub mod transaction;
@@ -8,6 +9,7 @@ pub mod transaction;
 pub use bundle::*;
 pub use errors::*;
 pub use external_scheduler::*;
+pub use lock_guard::*;
 pub use metadata::*;
 pub use traits::*;
 pub use transaction::*;

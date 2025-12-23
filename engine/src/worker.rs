@@ -9,7 +9,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new_withshared_locks(id: usize, locked_accounts: Arc<RwLock<HashSet<Pubkey>>>) -> Self {
+    pub fn new_with_shared_locks(id: usize, locked_accounts: Arc<RwLock<HashSet<Pubkey>>>) -> Self {
         Self {
             id,
             locked_accounts,
@@ -20,7 +20,7 @@ impl Worker {
         self.id
     }
 
-    fn accquire_locks(&self, accounts: &HashSet<Pubkey>) -> Result<()> {
+    fn acquire_locks(&self, accounts: &HashSet<Pubkey>) -> Result<()> {
         let mut locked = self.locked_accounts.write();
 
         if accounts.iter().any(|acc| locked.contains(acc)) {
@@ -44,7 +44,7 @@ impl Worker {
 
     pub fn execute_transaction(&self, tx: &Transaction) -> Result<()> {
         let accounts = tx.all_accounts();
-        self.accquire_locks(&accounts)?;
+        self.acquire_locks(&accounts)?;
 
         let result = self.execute_transaction_inner(tx);
 
@@ -54,7 +54,7 @@ impl Worker {
 
     pub fn execute_bundle(&self, bundle: &Bundle) -> Result<()> {
         let accounts = bundle.all_accounts();
-        self.accquire_locks(&accounts)?;
+        self.acquire_locks(&accounts)?;
 
         for tx in &bundle.transactions {
             if let Err(e) = self.execute_transaction_inner(tx) {
@@ -77,7 +77,7 @@ impl WorkerPool {
         let global_locks = Arc::new(RwLock::new(HashSet::new()));
 
         let workers = (0..worker_count)
-            .map(|id| Worker::new_withshared_locks(id, Arc::clone(&global_locks)))
+            .map(|id| Worker::new_with_shared_locks(id, Arc::clone(&global_locks)))
             .collect();
 
         Self {
@@ -162,13 +162,13 @@ mod tests {
         let tx2 = Transaction::new("sig2".to_string(), accounts, 100_000, 1000);
 
         let accounts1 = tx1.all_accounts();
-        assert!(worker1.accquire_locks(&accounts1).is_ok());
+        assert!(worker1.acquire_locks(&accounts1).is_ok());
 
         let accounts2 = tx2.all_accounts();
-        assert!(worker2.accquire_locks(&accounts2).is_err());
+        assert!(worker2.acquire_locks(&accounts2).is_err());
 
         worker1.release_locks(&accounts1);
 
-        assert!(worker2.accquire_locks(&accounts2).is_ok());
+        assert!(worker2.acquire_locks(&accounts2).is_ok());
     }
 }

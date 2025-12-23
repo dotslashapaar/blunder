@@ -3,6 +3,8 @@ use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// Greedy scheduler optimized for maximum throughput during high load.
+/// Assigns work to the first available worker without conflicts - no load balancing overhead.
 pub struct GreedyScheduler {
     worker_states: Arc<Mutex<Vec<WorkerState>>>,
 }
@@ -24,6 +26,24 @@ impl GreedyScheduler {
         }
     }
 
+    /// Reset the scheduler state (clear all locked accounts)
+    pub fn reset(&self) {
+        let mut states = self.worker_states.lock();
+        for state in states.iter_mut() {
+            state.locked_accounts.clear();
+        }
+    }
+
+    pub fn release_accounts(&self, worker_id: usize, accounts: &HashSet<Pubkey>) {
+        let mut states = self.worker_states.lock();
+        if let Some(state) = states.get_mut(worker_id) {
+            for account in accounts {
+                state.locked_accounts.remove(account);
+            }
+        }
+    }
+
+    /// Find first available worker without conflicts - pure greedy, no load balancing
     fn find_available_worker(
         &self,
         accounts: &HashSet<Pubkey>,
@@ -43,7 +63,7 @@ impl GreedyScheduler {
 
         let worker_id = self
             .find_available_worker(&accounts, &states)
-            .ok_or_else(|| MevError::SchedulerError("No availble worker".to_string()))?;
+            .ok_or_else(|| MevError::SchedulerError("No available worker".to_string()))?;
 
         states[worker_id].locked_accounts.extend(accounts);
 
@@ -60,7 +80,7 @@ impl GreedyScheduler {
 
         let worker_id = self
             .find_available_worker(&accounts, &states)
-            .ok_or_else(|| MevError::SchedulerError("No availble worker".to_string()))?;
+            .ok_or_else(|| MevError::SchedulerError("No available worker".to_string()))?;
 
         states[worker_id].locked_accounts.extend(accounts);
 
@@ -128,13 +148,36 @@ mod tests {
         let accounts = vec![AccountMeta::new(pubkey, true)];
 
         let tx1 = Transaction::new("sig1".to_string(), accounts.clone(), 100_000, 1000);
-        let tx2 = Transaction::new("sig1".to_string(), accounts, 100_000, 1000);
+        let tx2 = Transaction::new("sig2".to_string(), accounts, 100_000, 1000);
 
         let result = scheduler.schedule(vec![], vec![tx1, tx2]);
         assert!(result.is_ok());
 
         let assignments = result.unwrap();
         assert_eq!(assignments.len(), 2);
+        // Conflicting txs go to different workers
         assert_ne!(assignments[0].worker_id, assignments[1].worker_id);
+    }
+
+    #[test]
+    fn test_reset() {
+        let scheduler = GreedyScheduler::new(2);
+
+        let pubkey = Pubkey::new_unique();
+        let accounts = vec![AccountMeta::new(pubkey, true)];
+        let tx = Transaction::new("sig1".to_string(), accounts.clone(), 100_000, 1000);
+
+        // Schedule one transaction
+        let _ = scheduler.schedule(vec![], vec![tx]);
+
+        // Reset should clear state
+        scheduler.reset();
+
+        // Should be able to schedule same account again to worker 0
+        let tx2 = Transaction::new("sig2".to_string(), accounts, 100_000, 1000);
+        let result = scheduler.schedule(vec![], vec![tx2]);
+        assert!(result.is_ok());
+        let assignments = result.unwrap();
+        assert_eq!(assignments[0].worker_id, 0);
     }
 }
