@@ -1,7 +1,17 @@
 use blunder_core::{Bundle, MevError, Pubkey, Result, Transaction};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
+
+/// Result of work completion sent back to the pool
+#[derive(Debug, Clone)]
+pub struct WorkCompletion {
+    pub worker_id: usize,
+    pub unit_id: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
 
 #[derive(Debug)]
 pub enum WorkItem {
@@ -14,6 +24,7 @@ pub struct AsyncWorker {
     id: usize,
     locked_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     work_rx: mpsc::UnboundedReceiver<WorkItem>,
+    completion_tx: mpsc::UnboundedSender<WorkCompletion>,
 }
 
 impl AsyncWorker {
@@ -21,11 +32,13 @@ impl AsyncWorker {
         id: usize,
         locked_accounts: Arc<RwLock<HashSet<Pubkey>>>,
         work_rx: mpsc::UnboundedReceiver<WorkItem>,
+        completion_tx: mpsc::UnboundedSender<WorkCompletion>,
     ) -> Self {
         Self {
             id,
             locked_accounts,
             work_rx,
+            completion_tx,
         }
     }
 
@@ -35,18 +48,44 @@ impl AsyncWorker {
         loop {
             match self.work_rx.recv().await {
                 Some(WorkItem::Transaction(tx)) => {
-                    if let Err(e) = self.execute_transaction(&tx).await {
-                        eprintln!("Worker {} tx {} failed: {}", self.id, tx.signature, e);
-                    } else {
-                        println!("Worker {} executed tx {}", self.id, tx.signature);
-                    }
+                    let unit_id = tx.signature.clone();
+                    let result = self.execute_transaction(&tx).await;
+                    let (success, error) = match result {
+                        Ok(_) => {
+                            println!("Worker {} executed tx {}", self.id, unit_id);
+                            (true, None)
+                        }
+                        Err(e) => {
+                            eprintln!("Worker {} tx {} failed: {}", self.id, unit_id, e);
+                            (false, Some(e.to_string()))
+                        }
+                    };
+                    let _ = self.completion_tx.send(WorkCompletion {
+                        worker_id: self.id,
+                        unit_id,
+                        success,
+                        error,
+                    });
                 }
                 Some(WorkItem::Bundle(bundle)) => {
-                    if let Err(e) = self.execute_bundle(&bundle).await {
-                        eprintln!("Worker {} bundle {} failed: {}", self.id, bundle.id, e);
-                    } else {
-                        println!("Worker {} executed bundle {}", self.id, bundle.id);
-                    }
+                    let unit_id = bundle.id.to_string();
+                    let result = self.execute_bundle(&bundle).await;
+                    let (success, error) = match result {
+                        Ok(_) => {
+                            println!("Worker {} executed bundle {}", self.id, unit_id);
+                            (true, None)
+                        }
+                        Err(e) => {
+                            eprintln!("Worker {} bundle {} failed: {}", self.id, unit_id, e);
+                            (false, Some(e.to_string()))
+                        }
+                    };
+                    let _ = self.completion_tx.send(WorkCompletion {
+                        worker_id: self.id,
+                        unit_id,
+                        success,
+                        error,
+                    });
                 }
                 Some(WorkItem::Shutdown) | None => {
                     println!("Worker {} shutting down", self.id);
@@ -56,7 +95,7 @@ impl AsyncWorker {
         }
     }
 
-    async fn accquire_locks(&self, accounts: &HashSet<Pubkey>) -> Result<()> {
+    async fn acquire_locks(&self, accounts: &HashSet<Pubkey>) -> Result<()> {
         let mut locked = self.locked_accounts.write().await;
 
         if accounts.iter().any(|acc| locked.contains(acc)) {
@@ -76,7 +115,7 @@ impl AsyncWorker {
 
     async fn execute_transaction(&self, tx: &Transaction) -> Result<()> {
         let accounts = tx.all_accounts();
-        self.accquire_locks(&accounts).await?;
+        self.acquire_locks(&accounts).await?;
 
         tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
 
@@ -86,7 +125,7 @@ impl AsyncWorker {
 
     async fn execute_bundle(&self, bundle: &Bundle) -> Result<()> {
         let accounts = bundle.all_accounts();
-        self.accquire_locks(&accounts).await?;
+        self.acquire_locks(&accounts).await?;
 
         for _tx in &bundle.transactions {
             tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
@@ -101,16 +140,19 @@ pub struct AsyncWorkerPool {
     worker_count: usize,
     senders: Vec<mpsc::UnboundedSender<WorkItem>>,
     global_locks: Arc<RwLock<HashSet<Pubkey>>>,
+    completion_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<WorkCompletion>>,
+    pending_work: AtomicUsize,
 }
 
 impl AsyncWorkerPool {
     pub fn spawn(worker_count: usize) -> Self {
         let global_locks = Arc::new(RwLock::new(HashSet::new()));
         let mut senders = Vec::new();
+        let (completion_tx, completion_rx) = mpsc::unbounded_channel();
 
         for id in 0..worker_count {
             let (tx, rx) = mpsc::unbounded_channel();
-            let worker = AsyncWorker::new(id, Arc::clone(&global_locks), rx);
+            let worker = AsyncWorker::new(id, Arc::clone(&global_locks), rx, completion_tx.clone());
 
             tokio::spawn(async move {
                 worker.run().await;
@@ -122,15 +164,53 @@ impl AsyncWorkerPool {
             worker_count,
             senders,
             global_locks,
+            completion_rx: tokio::sync::Mutex::new(completion_rx),
+            pending_work: AtomicUsize::new(0),
         }
     }
 
     pub fn send_work(&self, worker_id: usize, work: WorkItem) -> Result<()> {
+        // Don't count shutdown signals as pending work
+        let is_shutdown = matches!(work, WorkItem::Shutdown);
+
         self.senders
             .get(worker_id)
             .ok_or_else(|| MevError::SchedulerError("Invalid worker ID".to_string()))?
             .send(work)
-            .map_err(|_| MevError::SchedulerError("Worker channel closed".to_string()))
+            .map_err(|_| MevError::SchedulerError("Worker channel closed".to_string()))?;
+
+        if !is_shutdown {
+            self.pending_work.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
+    /// Wait for all pending work to complete and return the completion results
+    pub async fn wait_for_completions(&self) -> Vec<WorkCompletion> {
+        let pending = self.pending_work.load(Ordering::SeqCst);
+        if pending == 0 {
+            return Vec::new();
+        }
+
+        let mut completions = Vec::with_capacity(pending);
+        let mut rx = self.completion_rx.lock().await;
+
+        while completions.len() < pending {
+            match rx.recv().await {
+                Some(completion) => {
+                    completions.push(completion);
+                    self.pending_work.fetch_sub(1, Ordering::SeqCst);
+                }
+                None => break, // Channel closed
+            }
+        }
+
+        completions
+    }
+
+    /// Get the number of pending work items
+    pub fn pending_count(&self) -> usize {
+        self.pending_work.load(Ordering::SeqCst)
     }
 
     pub fn worker_count(&self) -> usize {
@@ -142,6 +222,21 @@ impl AsyncWorkerPool {
     }
 
     pub async fn shutdown(self) {
+        // Wait for any pending work to complete first
+        let pending = self.pending_work.load(Ordering::SeqCst);
+        if pending > 0 {
+            println!("Waiting for {} pending work items to complete...", pending);
+            let mut rx = self.completion_rx.lock().await;
+            let mut completed = 0;
+            while completed < pending {
+                if rx.recv().await.is_some() {
+                    completed += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
         println!("Sending shutdown signal to {} workers", self.worker_count);
 
         for sender in &self.senders {

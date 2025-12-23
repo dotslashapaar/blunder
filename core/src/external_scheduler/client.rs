@@ -156,7 +156,7 @@ impl ExternalSchedulerClient {
                 Self::validate_assignments(&assignments, &items, worker_count)?;
                 Ok(assignments)
             },
-            _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(5000)) => {
                 self.pending_requests.lock().await.remove(&request_id);
                 Err(MevError::Timeout("Scheduler timeout".to_string()))
             }

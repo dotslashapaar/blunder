@@ -32,29 +32,47 @@ impl IntegratedPipeline {
         let mut items: Vec<ExecutionUnitData> = Vec::new();
 
         // Convert Transactions to ExecutionUnitData
-        for tx in transactions {
+        for tx in &transactions {
             let accounts: Vec<[u8; 32]> =
                 tx.accounts.iter().map(|am| am.pubkey.to_bytes()).collect();
             items.push(ExecutionUnitData::Transaction {
                 id: tx.signature.clone(),
-                priority: 0,
+                priority: tx.compute_unit_price,
                 accounts,
             });
         }
 
         // Convert Bundles to ExecutionUnitData
-        for bundle in bundles {
+        for bundle in &bundles {
+            let accounts: Vec<[u8; 32]> =
+                bundle.all_accounts().iter().map(|p| p.to_bytes()).collect();
             items.push(ExecutionUnitData::Bundle {
                 id: bundle.id.to_string(),
                 tip: bundle.tip,
-                accounts: Vec::new(), // Adjust if bundle accounts available
+                accounts,
                 num_transactions: bundle.transactions.len(),
             });
         }
 
         let assignments = self.scheduler_engine.schedule(items.clone()).await?;
 
-        let results = self.dispatch_to_workers(items, assignments)?;
+        let dispatch_results = self.dispatch_to_workers(items, assignments)?;
+
+        // Wait for all workers to complete their assigned work
+        let completions = self.worker_pool.wait_for_completions().await;
+
+        // Merge dispatch results with actual completion results
+        let results: Vec<ExecutionResult> = dispatch_results
+            .into_iter()
+            .map(|mut r| {
+                // Update result with actual completion status if available
+                if let Some(completion) = completions.iter().find(|c| c.unit_id == r.unit_id) {
+                    r.success = completion.success;
+                    r.error = completion.error.clone();
+                }
+                r
+            })
+            .collect();
 
         Ok(BatchResult {
             total_processed: results.len(),
@@ -131,7 +149,7 @@ fn convert_execution_unit_to_transaction(unit: &ExecutionUnitData) -> Result<Tra
                 .iter()
                 .map(|bytes| {
                     let pubkey = Pubkey::new_from_array(*bytes);
-                    AccountMeta::new(pubkey, true) // adjust signer flag if needed
+                    AccountMeta::new(pubkey, true)
                 })
                 .collect();
 

@@ -6,8 +6,8 @@ pub const MAX_TRANSACTIONS_PER_BATCH: usize = 64;
 /// Maximum accounts per item
 pub const MAX_ACCOUNTS_PER_ITEM: usize = 64;
 
-/// Bloom filter size in u64s (256 bits)
-pub const BLOOM_FILTER_SIZE: usize = 4;
+/// Bloom filter size in u64s (1024 bits for ~1.2% false positive rate at 64 accounts)
+pub const BLOOM_FILTER_SIZE: usize = 16;
 
 /// Queue sizes
 pub const ENGINE_TO_SCHEDULER_QUEUE_SIZE: usize = 32768;

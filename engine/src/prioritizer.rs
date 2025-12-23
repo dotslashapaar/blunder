@@ -22,7 +22,7 @@ impl Prioritizer {
             .saturating_div(cu)
     }
 
-    pub fn priortize(
+    pub fn prioritize(
         &self,
         bundles: Vec<Bundle>,
         loose_txs: Vec<Transaction>,
@@ -61,7 +61,7 @@ mod tests {
         let high_fee_tx = Transaction::new("sig1".to_string(), accounts.clone(), 100_000, 10_000);
         let low_fee_tx = Transaction::new("sig2".to_string(), accounts.clone(), 100_000, 1_000);
 
-        let units = prioritizer.priortize(vec![], vec![high_fee_tx, low_fee_tx]);
+        let units = prioritizer.prioritize(vec![], vec![high_fee_tx, low_fee_tx]);
 
         assert_eq!(units.len(), 2);
 
@@ -89,7 +89,7 @@ mod tests {
         let wasteful_tx =
             Transaction::new("wasteful".to_string(), accounts.clone(), 1_000_000, 100);
 
-        let units = prioritizer.priortize(vec![], vec![wasteful_tx, efficient_tx]);
+        let units = prioritizer.prioritize(vec![], vec![wasteful_tx, efficient_tx]);
 
         // Efficient tx should be first despite paying less total fee
         if let SchedulableUnit::Transaction(tx) = &units[0] {
@@ -137,7 +137,7 @@ mod tests {
         let high_tip_bundle = Bundle::new(1, vec![tx.clone()], 100_000, "searcher1".to_string());
         let low_tip_bundle = Bundle::new(2, vec![tx.clone()], 10_000, "searcher2".to_string());
 
-        let units = prioritizer.priortize(vec![high_tip_bundle, low_tip_bundle], vec![]);
+        let units = prioritizer.prioritize(vec![high_tip_bundle, low_tip_bundle], vec![]);
 
         assert_eq!(units.len(), 2);
         assert!(matches!(units[0], SchedulableUnit::Bundle(_)));
@@ -163,7 +163,7 @@ mod tests {
         let large_tx = Transaction::new("large".to_string(), accounts.clone(), 500_000, 1000);
         let wasteful_bundle = Bundle::new(2, vec![large_tx], 100_000, "wasteful".to_string());
 
-        let units = prioritizer.priortize(vec![wasteful_bundle, efficient_bundle], vec![]);
+        let units = prioritizer.prioritize(vec![wasteful_bundle, efficient_bundle], vec![]);
 
         // Efficient bundle should win despite lower total tip
         if let SchedulableUnit::Bundle(b) = &units[0] {

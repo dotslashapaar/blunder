@@ -3,6 +3,7 @@
 use super::constants::*;
 use super::id_generator::ItemId;
 use crate::Pubkey;
+use std::collections::HashSet;
 
 pub type BloomFilter = [u64; BLOOM_FILTER_SIZE];
 
@@ -22,7 +23,9 @@ pub struct SchedulableItem {
     pub _reserved: [u8; 13],
 }
 
-const _: () = assert!(std::mem::size_of::<SchedulableItem>() == 96);
+// Size assertion: with BLOOM_FILTER_SIZE=16, bloom filter is 128 bytes
+// Total struct size is now 192 bytes
+const _: () = assert!(std::mem::size_of::<SchedulableItem>() == 192);
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -224,13 +227,69 @@ pub fn blooms_might_conflict(a: &BloomFilter, b: &BloomFilter) -> bool {
     false
 }
 
+/// Hybrid conflict detection: bloom filter pre-check + exact HashSet verification.
+/// This combines the speed of bloom filters with 100% accuracy of exact checks.
+///
+/// # Algorithm:
+/// 1. Fast bloom filter check - if no overlap, definitely no conflict (return false)
+/// 2. If bloom indicates possible conflict, verify with exact HashSet intersection
+///
+/// # Read/Write Semantics (Solana-compatible):
+/// - Write-Write: Always conflicts
+/// - Write-Read: Always conflicts (writer blocks readers)
+/// - Read-Read: No conflict (multiple concurrent readers allowed)
+pub fn accounts_conflict_hybrid_rw(
+    bloom_a: &BloomFilter,
+    write_a: &HashSet<Pubkey>,
+    read_a: &HashSet<Pubkey>,
+    bloom_b: &BloomFilter,
+    write_b: &HashSet<Pubkey>,
+    read_b: &HashSet<Pubkey>,
+) -> bool {
+    // Phase 1: Fast bloom filter pre-check
+    // If blooms don't overlap at all, definitely no conflict
+    if !blooms_might_conflict(bloom_a, bloom_b) {
+        return false;
+    }
+
+    // Phase 2: Exact verification (only runs on bloom "maybe" cases)
+    // Write-Write conflict
+    if !write_a.is_disjoint(write_b) {
+        return true;
+    }
+    // Write-Read conflict (either direction)
+    if !write_a.is_disjoint(read_b) || !read_a.is_disjoint(write_b) {
+        return true;
+    }
+    // Read-Read: No conflict
+    false
+}
+
+/// Simple hybrid conflict detection without read/write separation.
+/// Uses bloom pre-filter + exact HashSet check for all accounts.
+pub fn accounts_conflict_hybrid(
+    bloom_a: &BloomFilter,
+    accounts_a: &HashSet<Pubkey>,
+    bloom_b: &BloomFilter,
+    accounts_b: &HashSet<Pubkey>,
+) -> bool {
+    // Fast path: bloom says no conflict
+    if !blooms_might_conflict(bloom_a, bloom_b) {
+        return false;
+    }
+    // Exact verification
+    !accounts_a.is_disjoint(accounts_b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_schedulable_item_size() {
-        assert_eq!(std::mem::size_of::<SchedulableItem>(), 96);
+        // Size changed due to BLOOM_FILTER_SIZE increase from 4 to 16
+        // Old: 96 bytes, New: 96 + (12 * 8) = 192 bytes
+        assert_eq!(std::mem::size_of::<SchedulableItem>(), 192);
     }
 
     #[test]
@@ -251,5 +310,73 @@ mod tests {
         assert_eq!(item.item_type, ITEM_TYPE_BUNDLE);
         assert!(item.is_bundle());
         assert!(item.is_atomic());
+    }
+
+    #[test]
+    fn test_hybrid_conflict_no_bloom_overlap() {
+        // Different accounts should have different bloom filters (usually)
+        let acc1 = vec![Pubkey::new_unique()];
+        let acc2 = vec![Pubkey::new_unique()];
+
+        let bloom1 = compute_bloom_filter(&acc1);
+        let bloom2 = compute_bloom_filter(&acc2);
+
+        let set1: HashSet<_> = acc1.into_iter().collect();
+        let set2: HashSet<_> = acc2.into_iter().collect();
+
+        // Should not conflict (different accounts)
+        assert!(!accounts_conflict_hybrid(&bloom1, &set1, &bloom2, &set2));
+    }
+
+    #[test]
+    fn test_hybrid_conflict_same_accounts() {
+        let acc = Pubkey::new_unique();
+        let accounts = vec![acc];
+
+        let bloom = compute_bloom_filter(&accounts);
+        let set: HashSet<_> = accounts.into_iter().collect();
+
+        // Same accounts should conflict
+        assert!(accounts_conflict_hybrid(&bloom, &set, &bloom, &set));
+    }
+
+    #[test]
+    fn test_read_read_no_conflict() {
+        let acc = Pubkey::new_unique();
+        let accounts = vec![acc];
+
+        let bloom = compute_bloom_filter(&accounts);
+        let read_set: HashSet<_> = accounts.into_iter().collect();
+        let empty_write: HashSet<Pubkey> = HashSet::new();
+
+        // Read-read should NOT conflict
+        assert!(!accounts_conflict_hybrid_rw(
+            &bloom,
+            &empty_write,
+            &read_set,
+            &bloom,
+            &empty_write,
+            &read_set
+        ));
+    }
+
+    #[test]
+    fn test_write_write_conflict() {
+        let acc = Pubkey::new_unique();
+        let accounts = vec![acc];
+
+        let bloom = compute_bloom_filter(&accounts);
+        let write_set: HashSet<_> = accounts.into_iter().collect();
+        let empty_read: HashSet<Pubkey> = HashSet::new();
+
+        // Write-write should conflict
+        assert!(accounts_conflict_hybrid_rw(
+            &bloom,
+            &write_set,
+            &empty_read,
+            &bloom,
+            &write_set,
+            &empty_read
+        ));
     }
 }
